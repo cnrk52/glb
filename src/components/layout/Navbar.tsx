@@ -24,6 +24,7 @@ import { getInitials } from "@/lib/utils";
 
 export function Navbar() {
   const {
+    isFirestoreConnected,
     currentUser,
     activeMainTab,
     setActiveMainTab,
@@ -101,6 +102,27 @@ export function Navbar() {
                     </span>
                     <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                       {CAMPUS_BADGE}
+                    </span>
+                    <span
+                      className={`hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        isFirestoreConnected
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      }`}
+                      title={
+                        isFirestoreConnected
+                          ? "Firebase Cloud Firestore (hand2hand-agu) canlı bağlı"
+                          : "Firebase konsolundan Firestore Database'i (Test Mode) aktif ettiğinizde otomatik yeşile döner"
+                      }
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          isFirestoreConnected
+                            ? "bg-emerald-500 animate-pulse"
+                            : "bg-amber-500"
+                        }`}
+                      />
+                      {isFirestoreConnected ? "Firebase Canlı" : "Firebase Bekleniyor"}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 hidden xl:block">

@@ -1,6 +1,14 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  setDoc,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import {
   AppNotification,
   BudgetPreferenceType,
@@ -42,6 +50,9 @@ export interface ToastMessage {
 }
 
 interface AppContextType {
+  // Firebase Live Status
+  isFirestoreConnected: boolean;
+
   // Auth & User State
   currentUser: User | null;
   isOnboardingOpen: boolean;
@@ -161,8 +172,41 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: "h2h_agu_notifications_v1",
 };
 
+/**
+ * Strips undefined fields so Firestore setDoc never rejects optional undefined properties.
+ */
+function sanitizeForFirestore<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+async function saveDocToFirestore<T extends { id: string }>(
+  collectionName: string,
+  item: T
+) {
+  if (!db) return;
+  try {
+    await setDoc(
+      doc(db, collectionName, item.id),
+      sanitizeForFirestore(item) as Record<string, unknown>
+    );
+  } catch (err) {
+    console.warn(`Firestore write warning (${collectionName}/${item.id}):`, err);
+  }
+}
+
+async function removeDocFromFirestore(collectionName: string, id: string) {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, collectionName, id));
+  } catch (err) {
+    console.warn(`Firestore delete warning (${collectionName}/${id}):`, err);
+  }
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
+  const [isFirestoreConnected, setIsFirestoreConnected] = useState(false);
+  const hasSeededRef = useRef(false);
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -187,7 +231,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Load persisted state from localStorage on client mount
+  // 1. Load persisted user session and fallback local cache on client mount
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem(STORAGE_KEYS.USER);
@@ -223,7 +267,98 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Sync changes back to localStorage
+  // 2. Real-time Firebase Cloud Firestore Subscriptions & Auto-Seeding
+  useEffect(() => {
+    if (!db) return;
+
+    const unsubProducts = onSnapshot(
+      collection(db, "products"),
+      (snapshot) => {
+        setIsFirestoreConnected(true);
+        if (snapshot.empty && !hasSeededRef.current) {
+          hasSeededRef.current = true;
+          // Seed initial AGU data into Firestore on first run
+          INITIAL_PRODUCTS.forEach((p) => saveDocToFirestore("products", p));
+          INITIAL_NEED_POSTS.forEach((n) => saveDocToFirestore("needPosts", n));
+          INITIAL_OFFERS.forEach((o) => saveDocToFirestore("offers", o));
+          INITIAL_RESERVATIONS.forEach((r) => saveDocToFirestore("reservations", r));
+          INITIAL_DIRECT_MESSAGES.forEach((m) => saveDocToFirestore("directMessages", m));
+          INITIAL_NOTIFICATIONS.forEach((nf) => saveDocToFirestore("notifications", nf));
+          DEMO_USERS.forEach((u) => saveDocToFirestore("users", u));
+          return;
+        }
+        if (!snapshot.empty) {
+          const loaded = snapshot.docs.map((d) => d.data() as ProductItem);
+          setProducts(loaded);
+        }
+      },
+      (err) => {
+        console.warn("Firestore products listener fallback:", err.message);
+        setIsFirestoreConnected(false);
+      }
+    );
+
+    const unsubNeeds = onSnapshot(
+      collection(db, "needPosts"),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setNeedPosts(snapshot.docs.map((d) => d.data() as NeedPost));
+        }
+      },
+      () => {}
+    );
+
+    const unsubOffers = onSnapshot(
+      collection(db, "offers"),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setOffers(snapshot.docs.map((d) => d.data() as Offer));
+        }
+      },
+      () => {}
+    );
+
+    const unsubReservations = onSnapshot(
+      collection(db, "reservations"),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setReservations(snapshot.docs.map((d) => d.data() as Reservation));
+        }
+      },
+      () => {}
+    );
+
+    const unsubMessages = onSnapshot(
+      collection(db, "directMessages"),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setDirectMessages(snapshot.docs.map((d) => d.data() as DirectMessage));
+        }
+      },
+      () => {}
+    );
+
+    const unsubNotifs = onSnapshot(
+      collection(db, "notifications"),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setNotifications(snapshot.docs.map((d) => d.data() as AppNotification));
+        }
+      },
+      () => {}
+    );
+
+    return () => {
+      unsubProducts();
+      unsubNeeds();
+      unsubOffers();
+      unsubReservations();
+      unsubMessages();
+      unsubNotifs();
+    };
+  }, []);
+
+  // Sync changes back to localStorage as instant offline cache
   useEffect(() => {
     if (!isHydrated) return;
     try {
@@ -252,7 +387,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     notifications,
   ]);
 
-  // Keep selectedProduct in sync when products array updates (e.g., new Q&A or status change)
+  // Keep selectedProduct in sync when products array updates
   useEffect(() => {
     if (selectedProduct) {
       const updated = products.find((p) => p.id === selectedProduct.id);
@@ -294,7 +429,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    // Check if matches one of the demo users
     const existingDemoUser = DEMO_USERS.find(
       (u) => u.email.toLowerCase() === trimmedEmail
     );
@@ -302,6 +436,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (existingDemoUser) {
       setCurrentUser(existingDemoUser);
       setIsOnboardingOpen(false);
+      saveDocToFirestore("users", existingDemoUser);
       showToast(
         `Hoş geldin, ${existingDemoUser.fullName}!`,
         "AGU Sümer Kampüsü hesabınla giriş yapıldı."
@@ -309,7 +444,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { ok: true };
     }
 
-    // Otherwise create an instant logged-in session derived from the @agu.edu.tr address
     const namePart = trimmedEmail.split("@")[0].replace(/[._-]+/g, " ");
     const formattedName = namePart
       .split(" ")
@@ -318,20 +452,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .join(" ");
 
     const loggedUser: User = {
-      id: `user-${Date.now()}`,
+      id: `user-${trimmedEmail.split("@")[0].replace(/[^a-z0-9]/gi, "")}`,
       email: trimmedEmail,
       fullName: formattedName || "AGÜ Öğrencisi",
       department: "Bilgisayar Mühendisliği",
       rating: 5.0,
       reviewCount: 1,
       completedSwaps: 0,
-      joinedAt: "Ekim 2026",
+      joinedAt: "Kasım 2026",
       isVerifiedAgu: true,
       needsOnboarding: false,
     };
 
     setCurrentUser(loggedUser);
     setIsOnboardingOpen(false);
+    saveDocToFirestore("users", loggedUser);
     showToast(`Hoş geldin, ${loggedUser.fullName}!`, "Kampüs hesabın doğrulandı.");
     return { ok: true };
   };
@@ -351,7 +486,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    // Immediate registration without SMTP wait, triggering Onboarding Modal immediately
     const newUser: User = {
       id: `user-${Date.now()}`,
       email: trimmedEmail,
@@ -360,13 +494,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       rating: 5.0,
       reviewCount: 0,
       completedSwaps: 0,
-      joinedAt: "Ekim 2026",
+      joinedAt: "Kasım 2026",
       isVerifiedAgu: true,
       needsOnboarding: true,
     };
 
     setCurrentUser(newUser);
     setIsOnboardingOpen(true);
+    saveDocToFirestore("users", newUser);
     showToast(
       "Kayıt Başarılı! 🎓",
       "Şimdi kampüs profilini tamamlayarak hemen ilan paylaşmaya başlayabilirsin.",
@@ -390,9 +525,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     setCurrentUser(updatedUser);
     setIsOnboardingOpen(false);
+    saveDocToFirestore("users", updatedUser);
     showToast(
       `Aramıza hoş geldin, ${updatedUser.fullName}!`,
-      `${department} profilin oluşturuldu. İyi paylaşımlar!`
+      `${department} profilin oluşturuldu ve veritabanına kaydedildi.`
     );
   };
 
@@ -400,6 +536,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const found = DEMO_USERS.find((u) => u.id === userId) || DEMO_USERS[0];
     setCurrentUser(found);
     setIsOnboardingOpen(false);
+    saveDocToFirestore("users", found);
     showToast(
       `Demo Hesabı Aktif: ${found.fullName}`,
       `${found.department} (${found.email}) olarak giriş yapıldı.`
@@ -476,10 +613,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     setProducts((prev) => [newProduct, ...prev]);
+    saveDocToFirestore("products", newProduct);
     setActiveMainTab("vitrin");
     showToast(
       "Vitrin İlanın Yayında! 🎉",
-      `"${newProduct.title}" kampüs vitrinine eklendi.`
+      `"${newProduct.title}" Firebase veritabanına ve vitrine eklendi.`
     );
   };
 
@@ -489,7 +627,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       prev.map((p) => {
         if (p.id !== productId) return p;
         const alreadyFav = p.favoritedBy.includes(userId);
-        return {
+        const updatedProduct: ProductItem = {
           ...p,
           favoriteCount: alreadyFav
             ? Math.max(0, p.favoriteCount - 1)
@@ -498,13 +636,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? p.favoritedBy.filter((id) => id !== userId)
             : [...p.favoritedBy, userId],
         };
+        saveDocToFirestore("products", updatedProduct);
+        return updatedProduct;
       })
     );
   };
 
   const updateProductStatus = (productId: string, status: ProductStatus) => {
     setProducts((prev) =>
-      prev.map((p) => (p.id === productId ? { ...p, status } : p))
+      prev.map((p) => {
+        if (p.id !== productId) return p;
+        const updated = { ...p, status };
+        saveDocToFirestore("products", updated);
+        return updated;
+      })
     );
     const statusLabels: Record<ProductStatus, string> = {
       available: "Müsait",
@@ -516,10 +661,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const deleteProduct = (productId: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== productId));
+    removeDocFromFirestore("products", productId);
     if (selectedProduct?.id === productId) {
       setSelectedProduct(null);
     }
-    showToast("İlan Silindi", "Vitrin ilanınız kaldırıldı.", "info");
+    showToast("İlan Silindi", "Vitrin ilanınız veritabanından kaldırıldı.", "info");
   };
 
   // PUBLIC Q&A ACTIONS
@@ -537,9 +683,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     setProducts((prev) =>
-      prev.map((p) =>
-        p.id === productId ? { ...p, questions: [...p.questions, newQA] } : p
-      )
+      prev.map((p) => {
+        if (p.id !== productId) return p;
+        const updated = { ...p, questions: [...p.questions, newQA] };
+        saveDocToFirestore("products", updated);
+        return updated;
+      })
     );
 
     const targetProduct = products.find((p) => p.id === productId);
@@ -555,6 +704,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         relatedProductId: productId,
       };
       setNotifications((prev) => [newNotif, ...prev]);
+      saveDocToFirestore("notifications", newNotif);
     }
 
     showToast("Sorunuz İletildi 💬", "Satıcı yanıtladığında bildirim alacaksınız.");
@@ -570,7 +720,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setProducts((prev) =>
       prev.map((p) => {
         if (p.id !== productId) return p;
-        return {
+        const updated: ProductItem = {
           ...p,
           questions: p.questions.map((q) =>
             q.id === questionId
@@ -583,6 +733,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               : q
           ),
         };
+        saveDocToFirestore("products", updated);
+        return updated;
       })
     );
 
@@ -616,6 +768,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     setOffers((prev) => [newOffer, ...prev]);
+    saveDocToFirestore("offers", newOffer);
 
     const newNotif: AppNotification = {
       id: `notif-${Date.now()}`,
@@ -629,6 +782,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       relatedProductId: product.id,
     };
     setNotifications((prev) => [newNotif, ...prev]);
+    saveDocToFirestore("notifications", newNotif);
 
     showToast(
       `${offeredPrice} TL Teklif Gönderildi! 💸`,
@@ -641,24 +795,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!targetOffer) return;
 
     setOffers((prev) =>
-      prev.map((o) => (o.id === offerId ? { ...o, status: decision } : o))
+      prev.map((o) => {
+        if (o.id !== offerId) return o;
+        const updatedOffer = { ...o, status: decision };
+        saveDocToFirestore("offers", updatedOffer);
+        return updatedOffer;
+      })
     );
 
     if (decision === "accepted") {
-      // Automatically mark product as reserved for this buyer
       setProducts((prev) =>
-        prev.map((p) =>
-          p.id === targetOffer.productId
-            ? {
-                ...p,
-                status: "reserved",
-                price: targetOffer.offeredPrice,
-                reservedBy: targetOffer.buyerId,
-                reservedByName: targetOffer.buyerName,
-                reservedNote: `${targetOffer.offeredPrice} TL kabul edilen teklif ile ayrıldı`,
-              }
-            : p
-        )
+        prev.map((p) => {
+          if (p.id !== targetOffer.productId) return p;
+          const updatedProd: ProductItem = {
+            ...p,
+            status: "reserved",
+            price: targetOffer.offeredPrice,
+            reservedBy: targetOffer.buyerId,
+            reservedByName: targetOffer.buyerName,
+            reservedNote: `${targetOffer.offeredPrice} TL kabul edilen teklif ile ayrıldı`,
+          };
+          saveDocToFirestore("products", updatedProd);
+          return updatedProd;
+        })
       );
       showToast(
         "Teklif Kabul Edildi! 🤝",
@@ -703,20 +862,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     setReservations((prev) => [newRes, ...prev]);
+    saveDocToFirestore("reservations", newRes);
 
-    // Also update product status to reserved so campus peers see it immediately
     setProducts((prev) =>
-      prev.map((p) =>
-        p.id === productId
-          ? {
-              ...p,
-              status: "reserved",
-              reservedBy: currentUser.id,
-              reservedByName: currentUser.fullName,
-              reservedNote: `${proposedTime} - ${handoverPoint}`,
-            }
-          : p
-      )
+      prev.map((p) => {
+        if (p.id !== productId) return p;
+        const updatedProd: ProductItem = {
+          ...p,
+          status: "reserved",
+          reservedBy: currentUser.id,
+          reservedByName: currentUser.fullName,
+          reservedNote: `${proposedTime} - ${handoverPoint}`,
+        };
+        saveDocToFirestore("products", updatedProd);
+        return updatedProd;
+      })
     );
 
     const newNotif: AppNotification = {
@@ -731,6 +891,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       relatedProductId: product.id,
     };
     setNotifications((prev) => [newNotif, ...prev]);
+    saveDocToFirestore("notifications", newNotif);
 
     showToast(
       "Ürün Sizin İçin Rezerve Edildi! 📌",
@@ -746,22 +907,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!targetRes) return;
 
     setReservations((prev) =>
-      prev.map((r) => (r.id === reservationId ? { ...r, status } : r))
+      prev.map((r) => {
+        if (r.id !== reservationId) return r;
+        const updatedRes = { ...r, status };
+        saveDocToFirestore("reservations", updatedRes);
+        return updatedRes;
+      })
     );
 
     if (status === "approved") {
       setProducts((prev) =>
-        prev.map((p) =>
-          p.id === targetRes.productId
-            ? {
-                ...p,
-                status: "reserved",
-                reservedBy: targetRes.buyerId,
-                reservedByName: targetRes.buyerName,
-                reservedNote: `${targetRes.proposedTime} - ${targetRes.handoverPoint}`,
-              }
-            : p
-        )
+        prev.map((p) => {
+          if (p.id !== targetRes.productId) return p;
+          const updatedProd: ProductItem = {
+            ...p,
+            status: "reserved",
+            reservedBy: targetRes.buyerId,
+            reservedByName: targetRes.buyerName,
+            reservedNote: `${targetRes.proposedTime} - ${targetRes.handoverPoint}`,
+          };
+          saveDocToFirestore("products", updatedProd);
+          return updatedProd;
+        })
       );
       showToast(
         "Rezervasyon Onaylandı ✅",
@@ -769,9 +936,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
     } else if (status === "completed") {
       setProducts((prev) =>
-        prev.map((p) =>
-          p.id === targetRes.productId ? { ...p, status: "sold" } : p
-        )
+        prev.map((p) => {
+          if (p.id !== targetRes.productId) return p;
+          const updatedProd: ProductItem = { ...p, status: "sold" };
+          saveDocToFirestore("products", updatedProd);
+          return updatedProd;
+        })
       );
       showToast(
         "Kampüs Teslimatı Tamamlandı! 🌱",
@@ -779,17 +949,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
     } else if (status === "cancelled") {
       setProducts((prev) =>
-        prev.map((p) =>
-          p.id === targetRes.productId
-            ? {
-                ...p,
-                status: "available",
-                reservedBy: undefined,
-                reservedByName: undefined,
-                reservedNote: undefined,
-              }
-            : p
-        )
+        prev.map((p) => {
+          if (p.id !== targetRes.productId) return p;
+          const updatedProd: ProductItem = {
+            ...p,
+            status: "available",
+            reservedBy: undefined,
+            reservedByName: undefined,
+            reservedNote: undefined,
+          };
+          saveDocToFirestore("products", updatedProd);
+          return updatedProd;
+        })
       );
       showToast(
         "Rezervasyon İptal Edildi",
@@ -833,6 +1004,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     setNeedPosts((prev) => [newNeed, ...prev]);
+    saveDocToFirestore("needPosts", newNeed);
     setActiveMainTab("wishboard");
     showToast(
       "İhtiyaç İlanın Panoya Eklendi! 📌",
@@ -842,17 +1014,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const markNeedPostFulfilled = (needPostId: string) => {
     setNeedPosts((prev) =>
-      prev.map((n) =>
-        n.id === needPostId
-          ? { ...n, status: n.status === "open" ? "fulfilled" : "open" }
-          : n
-      )
+      prev.map((n) => {
+        if (n.id !== needPostId) return n;
+        const updatedNeed: NeedPost = {
+          ...n,
+          status: n.status === "open" ? "fulfilled" : "open",
+        };
+        saveDocToFirestore("needPosts", updatedNeed);
+        return updatedNeed;
+      })
     );
     showToast("İhtiyaç İlanı Güncellendi", "İlan durumu değiştirildi.");
   };
 
   const deleteNeedPost = (needPostId: string) => {
     setNeedPosts((prev) => prev.filter((n) => n.id !== needPostId));
+    removeDocFromFirestore("needPosts", needPostId);
     if (selectedNeedPost?.id === needPostId) {
       setSelectedNeedPost(null);
     }
@@ -900,11 +1077,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     setDirectMessages((prev) => [newDM, ...prev]);
+    saveDocToFirestore("directMessages", newDM);
 
     setNeedPosts((prev) =>
-      prev.map((n) =>
-        n.id === need.id ? { ...n, responseCount: n.responseCount + 1 } : n
-      )
+      prev.map((n) => {
+        if (n.id !== need.id) return n;
+        const updatedNeed = { ...n, responseCount: n.responseCount + 1 };
+        saveDocToFirestore("needPosts", updatedNeed);
+        return updatedNeed;
+      })
     );
 
     const newNotif: AppNotification = {
@@ -918,6 +1099,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       targetDashboardTab: "messages",
     };
     setNotifications((prev) => [newNotif, ...prev]);
+    saveDocToFirestore("notifications", newNotif);
 
     showToast(
       `Mesajın ${need.requesterName} adlı öğrenciye iletildi! 🤝`,
@@ -930,7 +1112,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setDirectMessages((prev) =>
       prev.map((dm) => {
         if (dm.id !== messageId) return dm;
-        return {
+        const updatedDM: DirectMessage = {
           ...dm,
           isRead: true,
           replies: [
@@ -944,18 +1126,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             },
           ],
         };
+        saveDocToFirestore("directMessages", updatedDM);
+        return updatedDM;
       })
     );
     showToast("Yanıt Gönderildi 💬", "Mesajınız sohbete eklendi.");
   };
 
   const markAllNotificationsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    setNotifications((prev) =>
+      prev.map((n) => {
+        const updated = { ...n, isRead: true };
+        saveDocToFirestore("notifications", updated);
+        return updated;
+      })
+    );
   };
 
   const markNotificationRead = (id: string) => {
     setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+      prev.map((n) => {
+        if (n.id !== id) return n;
+        const updated = { ...n, isRead: true };
+        saveDocToFirestore("notifications", updated);
+        return updated;
+      })
     );
   };
 
@@ -966,6 +1161,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setReservations(INITIAL_RESERVATIONS);
     setDirectMessages(INITIAL_DIRECT_MESSAGES);
     setNotifications(INITIAL_NOTIFICATIONS);
+
+    INITIAL_PRODUCTS.forEach((p) => saveDocToFirestore("products", p));
+    INITIAL_NEED_POSTS.forEach((n) => saveDocToFirestore("needPosts", n));
+    INITIAL_OFFERS.forEach((o) => saveDocToFirestore("offers", o));
+    INITIAL_RESERVATIONS.forEach((r) => saveDocToFirestore("reservations", r));
+    INITIAL_DIRECT_MESSAGES.forEach((m) => saveDocToFirestore("directMessages", m));
+    INITIAL_NOTIFICATIONS.forEach((nf) => saveDocToFirestore("notifications", nf));
+
     localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
     localStorage.removeItem(STORAGE_KEYS.NEEDS);
     localStorage.removeItem(STORAGE_KEYS.OFFERS);
@@ -982,6 +1185,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider
       value={{
+        isFirestoreConnected,
         currentUser,
         isOnboardingOpen,
         loginWithAguEmail,
