@@ -70,6 +70,14 @@ export function ProductDetailModal() {
     currentUser?.id || ""
   );
   const isSeller = currentUser?.id === selectedProduct.sellerId;
+  const isFreeItem = selectedProduct.isFree || selectedProduct.price === 0;
+  const isSold = selectedProduct.status === "sold";
+  const isUnavailable = selectedProduct.status !== "available";
+  const isReservedByMe =
+    selectedProduct.status === "reserved" &&
+    !!currentUser &&
+    selectedProduct.reservedBy === currentUser.id;
+  const canAct = !isSeller && !isUnavailable;
 
   const handleOpenOffer = () => {
     if (selectedProduct.isFree || selectedProduct.price === 0) return;
@@ -116,7 +124,7 @@ export function ProductDetailModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
       <div className="bg-white rounded-3xl max-w-5xl w-full border border-slate-200 shadow-2xl overflow-hidden my-6 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         {/* Top Modal Header */}
         <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between shrink-0">
@@ -166,7 +174,7 @@ export function ProductDetailModal() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* LEFT COLUMN: Image Gallery */}
             <div className="lg:col-span-6 space-y-3">
-              <div className="relative aspect-4/3 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200">
+              <div className="relative aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-200">
                 <img
                   src={
                     selectedProduct.images[activeImageIndex] ||
@@ -256,7 +264,7 @@ export function ProductDetailModal() {
                     {selectedProduct.isFree || selectedProduct.price === 0 ? (
                       <div className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-lg">
                         <Gift className="w-5 h-5 text-emerald-600" />
-                        <span>ÜCRETSİZ / KAMPÜS BAĞIŞI</span>
+                        <span>{selectedProduct.listingType === "borrow" ? "ÖDÜNÇ VERİLİR (İADELİ)" : "ÜCRETSİZ / KAMPÜS BAĞIŞI"}</span>
                       </div>
                     ) : (
                       <div className="text-3xl font-extrabold text-slate-900">
@@ -265,6 +273,15 @@ export function ProductDetailModal() {
                     )}
                   </div>
                 </div>
+
+                {selectedProduct.retailPrice ? (
+                  <div className="text-xs text-slate-500">
+                    Tahmini sıfır fiyatı:{" "}
+                    <strong className="text-slate-700">
+                      {selectedProduct.retailPrice.toLocaleString("tr-TR")} ₺
+                    </strong>
+                  </div>
+                ) : null}
 
                 {/* Description */}
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
@@ -354,43 +371,83 @@ export function ProductDetailModal() {
 
               {/* TWO PRIMARY ACTION BUTTONS: "Teklif Ver" & "Ayırt / Rezerve Et" */}
               <div className="space-y-3 pt-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Button 1: Teklif Ver (Disabled if item is Free) */}
-                  <button
-                    type="button"
-                    disabled={
-                      selectedProduct.isFree || selectedProduct.price === 0
-                    }
-                    onClick={handleOpenOffer}
-                    className={`py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border transition-all ${
-                      selectedProduct.isFree || selectedProduct.price === 0
-                        ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
-                        : activeActionPanel === "offer"
-                        ? "bg-slate-900 text-white border-slate-900"
-                        : "bg-white hover:bg-slate-50 text-slate-900 border-slate-300 cursor-pointer"
+                {/* Seller's own listing: no buy actions */}
+                {isSeller && (
+                  <div className="p-3.5 rounded-2xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      <strong>Bu senin ilanın.</strong> Teklif ve rezerve taleplerini Profilim → Teklifler & Rezerveler sekmesinden yönetebilirsin.
+                    </span>
+                  </div>
+                )}
+
+                {/* Status badge when someone else's item is not available */}
+                {!isSeller && isUnavailable && (
+                  <div
+                    className={`p-3 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
+                      isSold
+                        ? "bg-slate-800 text-white border-slate-800"
+                        : "bg-amber-50 text-amber-900 border-amber-300"
                     }`}
                   >
-                    <Tag className="w-4 h-4 text-emerald-600" />
-                    <span>
-                      {selectedProduct.isFree || selectedProduct.price === 0
-                        ? "Ücretsiz Ürün (Teklife Kapalı)"
-                        : "Teklif Ver (Fiyat Öner)"}
-                    </span>
-                  </button>
+                    {isSold
+                      ? "✓ Bu ürün satıldı / teslim edildi — yeni teklif veya rezerve alınmıyor."
+                      : isReservedByMe
+                      ? "📌 Bu ürünü sen rezerve ettin. Satıcı onayını Profilim → Teklifler & Rezerveler'den takip edebilirsin."
+                      : "📌 Bu ürün rezerve edilmiş — şu an yeni teklif veya rezerve alınmıyor."}
+                  </div>
+                )}
 
-                  {/* Button 2: Ayırt / Rezerve Et */}
-                  <button
-                    type="button"
-                    onClick={handleOpenReserve}
-                    className="py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
-                  >
-                    <CalendarClock className="w-4 h-4" />
-                    <span>Ayırt / Rezerve Et</span>
-                  </button>
-                </div>
+                {!isSeller && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      disabled={isFreeItem || isUnavailable}
+                      onClick={handleOpenOffer}
+                      className={`py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border transition-all ${
+                        isFreeItem || isUnavailable
+                          ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
+                          : activeActionPanel === "offer"
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "bg-white hover:bg-slate-50 text-slate-900 border-slate-300 cursor-pointer"
+                      }`}
+                    >
+                      <Tag className="w-4 h-4 text-emerald-600" />
+                      <span>
+                        {isUnavailable
+                          ? "Teklife Kapalı"
+                          : isFreeItem
+                          ? selectedProduct.listingType === "borrow"
+                            ? "Ödünç Ürün (Teklife Kapalı)"
+                            : "Ücretsiz Ürün (Teklife Kapalı)"
+                          : "Teklif Ver (Fiyat Öner)"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isUnavailable}
+                      onClick={handleOpenReserve}
+                      className={`py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all ${
+                        isUnavailable
+                          ? "bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed"
+                          : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 cursor-pointer"
+                      }`}
+                    >
+                      <CalendarClock className="w-4 h-4" />
+                      <span>
+                        {isUnavailable
+                          ? isSold
+                            ? "Satıldı / Teslim Edildi"
+                            : "Rezerve Edildi"
+                          : "Ayırt / Rezerve Et"}
+                      </span>
+                    </button>
+                  </div>
+                )}
 
                 {/* POPUP PANEL 1: TEKLİF VER (MAKE AN OFFER) */}
-                {activeActionPanel === "offer" && (
+                {canAct && activeActionPanel === "offer" && (
                   <form
                     onSubmit={handleOfferSubmit}
                     className="p-4 rounded-2xl bg-slate-50 border-2 border-slate-900/15 space-y-3 animate-in fade-in duration-150"
@@ -465,7 +522,7 @@ export function ProductDetailModal() {
                 )}
 
                 {/* POPUP PANEL 2: AYIRT / REZERVE ET (RESERVE FOR CAMPUS PICKUP) */}
-                {activeActionPanel === "reserve" && (
+                {canAct && activeActionPanel === "reserve" && (
                   <form
                     onSubmit={handleReserveSubmit}
                     className="p-4 rounded-2xl bg-emerald-50/80 border-2 border-emerald-500/30 space-y-3 animate-in fade-in duration-150"
@@ -620,7 +677,7 @@ export function ProductDetailModal() {
                         </div>
                       </div>
 
-                      {!qa.answer && (
+                      {!qa.answer && isSeller && (
                         <button
                           type="button"
                           onClick={() =>
@@ -637,7 +694,7 @@ export function ProductDetailModal() {
 
                     {/* Seller Reply with "Satıcı" Badge */}
                     {qa.answer && (
-                      <div className="ml-6 sm:ml-9 p-3.5 rounded-xl bg-white border border-emerald-200/90 shadow-2xs">
+                      <div className="ml-6 sm:ml-9 p-3.5 rounded-xl bg-white border border-emerald-200/90 shadow-sm">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-bold text-slate-900">
                             {qa.sellerName || selectedProduct.sellerName}
@@ -659,7 +716,7 @@ export function ProductDetailModal() {
                     )}
 
                     {/* Reply Input if Seller clicks reply */}
-                    {replyingToQuestionId === qa.id && !qa.answer && (
+                    {replyingToQuestionId === qa.id && !qa.answer && isSeller && (
                       <form
                         onSubmit={(e) => handleAnswerSubmit(e, qa.id)}
                         className="ml-6 sm:ml-9 flex gap-2 pt-1"

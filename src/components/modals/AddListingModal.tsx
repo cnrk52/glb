@@ -9,6 +9,7 @@ import {
   MapPin,
   Pin,
   Plus,
+  Repeat,
   ShoppingBag,
   Sparkles,
   Tag,
@@ -25,11 +26,17 @@ import {
 import {
   BudgetPreferenceType,
   CampusHandoverPoint,
+  ListingType,
   NeedUrgency,
   ProductCategory,
   ProductCondition,
 } from "@/types";
 import { useApp } from "@/context/AppContext";
+import { compressImage } from "@/lib/image";
+
+const MAX_IMAGES = 5;
+// Keep the whole document comfortably below Firestore's 1 MB limit
+const MAX_TOTAL_IMAGE_CHARS = 700_000;
 
 export function AddListingModal() {
   const {
@@ -48,15 +55,18 @@ export function AddListingModal() {
     useState<Exclude<ProductCategory, "all">>("lab_stationery");
   const [prodCondition, setProdCondition] =
     useState<ProductCondition>("like_new");
-  const [isFree, setIsFree] = useState(false);
+  const [listingType, setListingType] = useState<ListingType>("sale");
+  const [retailPrice, setRetailPrice] = useState("");
   const [prodPrice, setProdPrice] = useState("250");
   const [prodHandover, setProdHandover] =
     useState<CampusHandoverPoint>("Kütüphane Önü");
   const [prodCourseCode, setProdCourseCode] = useState("");
   const [prodDescription, setProdDescription] = useState("");
-  const [selectedImageUrl, setSelectedImageUrl] = useState(
-    PRESET_ITEM_IMAGES[0].url
-  );
+  const [selectedImages, setSelectedImages] = useState<string[]>([
+    PRESET_ITEM_IMAGES[0].url,
+  ]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Option B: Need Post State
@@ -85,16 +95,60 @@ export function AddListingModal() {
     label: string;
   }[];
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setSelectedImageUrl(reader.result);
+  const totalImageChars = (list: string[]) =>
+    list.reduce((sum, u) => sum + (u.startsWith("data:") ? u.length : 0), 0);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setImageError(null);
+
+    const room = MAX_IMAGES - selectedImages.length;
+    if (room <= 0) {
+      setImageError(`En fazla ${MAX_IMAGES} fotoğraf ekleyebilirsin.`);
+      return;
+    }
+
+    setIsCompressing(true);
+    try {
+      // HTML5 Canvas: max 800px width, JPEG quality 0.7
+      const compressed: string[] = [];
+      for (const f of files.slice(0, room)) {
+        compressed.push(await compressImage(f));
       }
-    };
-    reader.readAsDataURL(file);
+      const next = [...selectedImages, ...compressed];
+      if (totalImageChars(next) > MAX_TOTAL_IMAGE_CHARS) {
+        setImageError(
+          "Fotoğraflar toplamda çok büyük. Lütfen daha az veya daha küçük fotoğraf seç."
+        );
+        return;
+      }
+      setSelectedImages(next);
+      if (files.length > room) {
+        setImageError(`En fazla ${MAX_IMAGES} fotoğraf eklenebilir; fazlası alınmadı.`);
+      }
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "Görsel yüklenemedi.");
+    } finally {
+      setIsCompressing(false);
+    }
+  };
+
+  const togglePreset = (url: string) => {
+    setImageError(null);
+    if (selectedImages.includes(url)) {
+      setSelectedImages((prev) => prev.filter((u) => u !== url));
+    } else if (selectedImages.length >= MAX_IMAGES) {
+      setImageError(`En fazla ${MAX_IMAGES} fotoğraf ekleyebilirsin.`);
+    } else {
+      setSelectedImages((prev) => [...prev, url]);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setImageError(null);
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleProductSubmit = (e: React.FormEvent) => {
@@ -106,11 +160,12 @@ export function AddListingModal() {
       description:
         prodDescription.trim() ||
         "AGÜ Sümer Kampüsü içinde elden teslim edilecek temiz akademik materyal.",
-      price: isFree ? 0 : Math.max(0, Number(prodPrice) || 0),
-      isFree: isFree || Number(prodPrice) === 0,
+      price: listingType === "sale" ? Math.max(0, Number(prodPrice) || 0) : 0,
+      listingType,
+      retailPrice: Number(retailPrice) > 0 ? Number(retailPrice) : undefined,
       category: prodCategory,
       condition: prodCondition,
-      images: [selectedImageUrl],
+      images: selectedImages,
       handoverPoint: prodHandover,
       courseCode: prodCourseCode,
     });
@@ -119,6 +174,8 @@ export function AddListingModal() {
     setProdTitle("");
     setProdDescription("");
     setProdCourseCode("");
+    setRetailPrice("");
+    setImageError(null);
     closeAddListingModal();
   };
 
@@ -154,7 +211,7 @@ export function AddListingModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Top Header */}
         <div className="px-6 py-5 bg-slate-900 text-white flex items-center justify-between">
@@ -184,7 +241,7 @@ export function AddListingModal() {
               onClick={() => setMode("product")}
               className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
                 mode === "product"
-                  ? "bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs"
+                  ? "bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm"
                   : "bg-white/60 border-slate-200 hover:bg-white"
               }`}
             >
@@ -212,7 +269,7 @@ export function AddListingModal() {
               onClick={() => setMode("need")}
               className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
                 mode === "need"
-                  ? "bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs"
+                  ? "bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm"
                   : "bg-white/60 border-slate-200 hover:bg-white"
               }`}
             >
@@ -243,38 +300,72 @@ export function AddListingModal() {
             onSubmit={handleProductSubmit}
             className="p-6 space-y-5 max-h-[72vh] overflow-y-auto"
           >
-            {/* Image Upload & Preset Selector for Demo Ease */}
+            {/* Multi-photo upload (auto-compressed) & preset selector */}
             <div>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2 gap-2">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                   <ImageIcon className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Ürün Fotoğrafı (Yükle veya Hazır Akademik Görsel Seç)</span>
+                  <span>
+                    Ürün Fotoğrafları ({selectedImages.length}/{MAX_IMAGES})
+                  </span>
                 </label>
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
+                  multiple
                   onChange={handleFileUpload}
                   className="hidden"
                 />
                 <button
                   type="button"
+                  disabled={isCompressing || selectedImages.length >= MAX_IMAGES}
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 cursor-pointer"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>Cihazdan Yükle</span>
+                  <span>{isCompressing ? "Sıkıştırılıyor..." : "Cihazdan Yükle (Çoklu)"}</span>
                 </button>
               </div>
 
+              {selectedImages.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {selectedImages.map((url, idx) => (
+                    <div
+                      key={`${idx}-${url.slice(-16)}`}
+                      className="relative w-16 h-16 rounded-xl overflow-hidden border-2 border-emerald-500"
+                    >
+                      <img src={url} alt="" className="w-full h-full object-cover" />
+                      {idx === 0 && (
+                        <span className="absolute bottom-0 inset-x-0 text-center text-[9px] font-bold bg-emerald-600 text-white">
+                          Kapak
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(idx)}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer"
+                        title="Kaldır"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {imageError && (
+                <p className="text-xs text-rose-600 font-medium mb-2">{imageError}</p>
+              )}
+
               <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
                 {PRESET_ITEM_IMAGES.map((preset) => {
-                  const isSelected = selectedImageUrl === preset.url;
+                  const isSelected = selectedImages.includes(preset.url);
                   return (
                     <button
                       key={preset.url}
                       type="button"
-                      onClick={() => setSelectedImageUrl(preset.url)}
+                      onClick={() => togglePreset(preset.url)}
                       className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all cursor-pointer ${
                         isSelected
                           ? "border-emerald-600 ring-2 ring-emerald-500/30 scale-105"
@@ -296,6 +387,9 @@ export function AddListingModal() {
                   );
                 })}
               </div>
+              <p className="text-[11px] text-slate-400 mt-2">
+                Yüklenen fotoğraflar otomatik sıkıştırılır (max 800px, JPEG %70). Hazır görselleri tıklayarak ekleyip çıkarabilirsin.
+              </p>
             </div>
 
             {/* Product Title & Course Code */}
@@ -373,7 +467,7 @@ export function AddListingModal() {
               </div>
             </div>
 
-            {/* Price Toggle: "Fiyat Belirle" vs "Ücretsiz Paylaş" */}
+            {/* Listing type: Ücretli / Ücretsiz / Ödünç + optional retail price */}
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -384,35 +478,46 @@ export function AddListingModal() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsFree(false)}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    !isFree
-                      ? "bg-white border-slate-900 text-slate-900 shadow-xs"
+                  onClick={() => setListingType("sale")}
+                  className={`py-2.5 px-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    listingType === "sale"
+                      ? "bg-white border-slate-900 text-slate-900 shadow-sm"
                       : "bg-transparent border-slate-200 text-slate-500"
                   }`}
                 >
                   <Tag className="w-4 h-4" />
-                  <span>Fiyat Belirle (Satış)</span>
+                  <span>Ücretli</span>
                 </button>
-
                 <button
                   type="button"
-                  onClick={() => setIsFree(true)}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    isFree
-                      ? "bg-emerald-600 border-emerald-600 text-white shadow-xs"
+                  onClick={() => setListingType("free")}
+                  className={`py-2.5 px-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    listingType === "free"
+                      ? "bg-emerald-600 border-emerald-600 text-white shadow-sm"
                       : "bg-white border-slate-200 text-emerald-700"
                   }`}
                 >
                   <Gift className="w-4 h-4" />
-                  <span>Ücretsiz Paylaş / Bağışla</span>
+                  <span>Ücretsiz</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setListingType("borrow")}
+                  className={`py-2.5 px-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    listingType === "borrow"
+                      ? "bg-sky-600 border-sky-600 text-white shadow-sm"
+                      : "bg-white border-slate-200 text-sky-700"
+                  }`}
+                >
+                  <Repeat className="w-4 h-4" />
+                  <span>Ödünç Ver</span>
                 </button>
               </div>
 
-              {!isFree ? (
+              {listingType === "sale" && (
                 <div className="pt-1">
                   <label className="block text-xs font-semibold text-slate-600 mb-1">
                     Satış Fiyatı (TL)
@@ -420,18 +525,41 @@ export function AddListingModal() {
                   <input
                     type="number"
                     min={1}
-                    required={!isFree}
+                    required
                     value={prodPrice}
                     onChange={(e) => setProdPrice(e.target.value)}
                     placeholder="Örn: 250"
                     className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
                   />
                 </div>
-              ) : (
+              )}
+              {listingType === "free" && (
                 <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-medium">
                   🌱 Bu ürün vitrinde yeşil <strong>ÜCRETSİZ</strong> rozetiyle yayınlanacak ve ihtiyacı olan bir AGÜ öğrencisine doğrudan destek olacak!
                 </div>
               )}
+              {listingType === "borrow" && (
+                <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-200 text-xs text-sky-900 font-medium">
+                  🔁 Bu ürün <strong>ÖDÜNÇ</strong> rozetiyle yayınlanır; kullanım sonrası sana iade edilmek üzere kampüste elden verilir.
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Tahmini Sıfır Fiyatı (TL){" "}
+                  <span className="font-normal text-slate-400">
+                    — opsiyonel, kampüs tasarruf hesabında kullanılır
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={retailPrice}
+                  onChange={(e) => setRetailPrice(e.target.value)}
+                  placeholder="Örn: 900 (yeni alındığında ne kadar?)"
+                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
             </div>
 
             {/* Campus Handover Location */}

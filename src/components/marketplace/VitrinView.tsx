@@ -41,7 +41,7 @@ import {
 } from "@/lib/utils";
 
 type SortOption = "newest" | "price_asc" | "price_desc" | "free_only";
-type PriceTypeFilter = "all" | "paid" | "free";
+type PriceTypeFilter = "all" | "paid" | "free" | "borrow";
 
 export function VitrinView() {
   const {
@@ -128,8 +128,12 @@ export function VitrinView() {
     }
 
     // 4. Price Type Filter
-    if (priceType === "free" || sortBy === "free_only") {
-      list = list.filter((p) => p.isFree || p.price === 0);
+    if (priceType === "borrow") {
+      list = list.filter((p) => p.listingType === "borrow");
+    } else if (priceType === "free" || sortBy === "free_only") {
+      list = list.filter(
+        (p) => (p.isFree || p.price === 0) && p.listingType !== "borrow"
+      );
     } else if (priceType === "paid") {
       list = list.filter((p) => !p.isFree && p.price > 0);
     }
@@ -200,13 +204,13 @@ export function VitrinView() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <div className="px-4 py-3 rounded-2xl bg-white/10 backdrop-blur-xs border border-white/15 text-center">
+            <div className="px-4 py-3 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/15 text-center">
               <div className="text-xl font-extrabold text-emerald-400">
                 {products.length}
               </div>
               <div className="text-[11px] text-slate-300">Aktif Vitrin İlanı</div>
             </div>
-            <div className="px-4 py-3 rounded-2xl bg-emerald-500/20 backdrop-blur-xs border border-emerald-400/30 text-center">
+            <div className="px-4 py-3 rounded-2xl bg-emerald-500/20 backdrop-blur-sm border border-emerald-400/30 text-center">
               <div className="text-xl font-extrabold text-emerald-300">
                 {freeProductsCount}
               </div>
@@ -254,7 +258,7 @@ export function VitrinView() {
               </span>
               <span>{cat.label}</span>
               <span
-                className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                   isSelected
                     ? "bg-white/20 text-white"
                     : "bg-slate-100 text-slate-600"
@@ -270,7 +274,7 @@ export function VitrinView() {
       {/* MAIN E-COMMERCE LAYOUT: LEFT SIDEBAR FILTERS + RIGHT 4-COLUMN PRODUCT GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT FILTER SIDEBAR */}
-        <aside className="lg:col-span-3 bg-white rounded-2xl border border-slate-200/90 p-5 space-y-6 lg:sticky lg:top-24 shadow-2xs">
+        <aside className="lg:col-span-3 bg-white rounded-2xl border border-slate-200/90 p-5 space-y-6 lg:sticky lg:top-24 shadow-sm">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
               <Filter className="w-4 h-4 text-emerald-600" />
@@ -291,7 +295,7 @@ export function VitrinView() {
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
               Fiyat Türü
             </label>
-            <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl">
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
               <button
                 type="button"
                 onClick={() => {
@@ -300,7 +304,7 @@ export function VitrinView() {
                 }}
                 className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   priceType === "all" && sortBy !== "free_only"
-                    ? "bg-white text-slate-900 shadow-2xs"
+                    ? "bg-white text-slate-900 shadow-sm"
                     : "text-slate-600"
                 }`}
               >
@@ -314,7 +318,7 @@ export function VitrinView() {
                 }}
                 className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   priceType === "paid"
-                    ? "bg-white text-slate-900 shadow-2xs"
+                    ? "bg-white text-slate-900 shadow-sm"
                     : "text-slate-600"
                 }`}
               >
@@ -325,11 +329,25 @@ export function VitrinView() {
                 onClick={() => setPriceType("free")}
                 className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   priceType === "free" || sortBy === "free_only"
-                    ? "bg-emerald-600 text-white shadow-2xs"
+                    ? "bg-emerald-600 text-white shadow-sm"
                     : "text-emerald-700"
                 }`}
               >
                 Ücretsiz
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPriceType("borrow");
+                  if (sortBy === "free_only") setSortBy("newest");
+                }}
+                className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  priceType === "borrow"
+                    ? "bg-sky-600 text-white shadow-sm"
+                    : "text-sky-700"
+                }`}
+              >
+                Ödünç
               </button>
             </div>
           </div>
@@ -433,7 +451,7 @@ export function VitrinView() {
         {/* RIGHT PRODUCT GRID AREA */}
         <div className="lg:col-span-9 space-y-4">
           {/* Sorting & Results Count Bar */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+          <div className="bg-white rounded-2xl border border-slate-200/90 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-sm">
             <div className="text-xs sm:text-sm text-slate-600">
               Toplam{" "}
               <strong className="font-bold text-slate-900">
@@ -539,10 +557,10 @@ function ProductCard({
   return (
     <div
       onClick={onSelect}
-      className="group bg-white rounded-2xl border border-slate-200/90 hover:border-emerald-500/60 shadow-2xs hover:shadow-xl hover:shadow-slate-900/5 transition-all duration-200 flex flex-col overflow-hidden cursor-pointer"
+      className="group bg-white rounded-2xl border border-slate-200/90 hover:border-emerald-500/60 shadow-sm hover:shadow-xl hover:shadow-slate-900/5 transition-all duration-200 flex flex-col overflow-hidden cursor-pointer"
     >
       {/* Image Container */}
-      <div className="relative aspect-4/3 w-full bg-slate-100 overflow-hidden">
+      <div className="relative aspect-[4/3] w-full bg-slate-100 overflow-hidden">
         <img
           src={product.images[0]}
           alt={product.title}
@@ -552,22 +570,22 @@ function ProductCard({
         {/* Top Left Badges: Status & Condition */}
         <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
           {product.status === "available" ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600/95 text-white shadow-xs backdrop-blur-xs">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600/95 text-white shadow-sm backdrop-blur-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-white" />
               Müsait
             </span>
           ) : product.status === "reserved" ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-xs">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-sm">
               Rezerve Edildi
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-white shadow-xs">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-white shadow-sm">
               Teslim Edildi
             </span>
           )}
 
           <span
-            className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border backdrop-blur-md bg-white/90 text-slate-800 border-white/50 shadow-2xs`}
+            className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border backdrop-blur-md bg-white/90 text-slate-800 border-white/50 shadow-sm`}
           >
             {conditionObj.label}
           </span>
@@ -594,7 +612,7 @@ function ProductCard({
 
         {/* Bottom Overlay: Handover Point & Course Code */}
         <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1">
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-xs text-white text-[10px] font-medium truncate">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-sm text-white text-[10px] font-medium truncate">
             <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
             <span className="truncate">{product.handoverPoint}</span>
           </span>
@@ -642,7 +660,7 @@ function ProductCard({
             {product.isFree || product.price === 0 ? (
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-xs tracking-wide">
                 <Gift className="w-3.5 h-3.5 text-emerald-600" />
-                ÜCRETSİZ
+                {product.listingType === "borrow" ? "ÖDÜNÇ" : "ÜCRETSİZ"}
               </span>
             ) : (
               <span className="text-base font-extrabold text-slate-900">

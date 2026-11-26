@@ -10,6 +10,8 @@ export type ProductCondition = "like_new" | "good" | "fair";
 
 export type ProductStatus = "available" | "reserved" | "sold";
 
+export type ListingType = "sale" | "free" | "borrow";
+
 export type CampusHandoverPoint =
   | "Kütüphane Önü"
   | "Çelik Kafe"
@@ -70,6 +72,10 @@ export interface ProductItem {
   reservedBy?: string;
   reservedByName?: string;
   reservedNote?: string;
+  /** sale = paid, free = donation, borrow = lend. Missing on legacy docs. */
+  listingType?: ListingType;
+  /** Optional estimated price of the item when new (TL) – used for savings calc. */
+  retailPrice?: number;
 }
 
 export type OfferStatus = "pending" | "accepted" | "rejected";
@@ -117,6 +123,19 @@ export type NeedUrgency = "urgent_lab" | "this_week" | "normal";
 
 export type BudgetPreferenceType = "max_price" | "free_borrow" | "negotiable";
 
+export interface NeedComment {
+  id: string;
+  needPostId: string;
+  authorId: string;
+  authorName: string;
+  authorDepartment: string;
+  authorAvatar?: string;
+  text: string;
+  offerPrice?: number;
+  isFreeOffer: boolean;
+  createdAt: string;
+}
+
 export interface NeedPost {
   id: string;
   requesterId: string;
@@ -135,6 +154,8 @@ export interface NeedPost {
   createdAt: string;
   status: "open" | "fulfilled";
   responseCount: number;
+  /** Public "Teklif / Yorum Akışı" visible to all students. */
+  comments?: NeedComment[];
 }
 
 export interface DirectMessageReply {

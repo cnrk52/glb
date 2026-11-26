@@ -14,6 +14,8 @@ import {
   BudgetPreferenceType,
   CampusHandoverPoint,
   DirectMessage,
+  ListingType,
+  NeedComment,
   NeedPost,
   NeedUrgency,
   Offer,
@@ -40,7 +42,8 @@ export type DashboardTab =
   | "my_products"
   | "my_needs"
   | "offers_reservations"
-  | "messages";
+  | "messages"
+  | "profile";
 
 export interface ToastMessage {
   id: string;
@@ -61,6 +64,8 @@ interface AppContextType {
   completeOnboarding: (fullName: string, department: string, avatarUrl?: string) => void;
   loginAsDemoUser: (userId?: string) => void;
   logout: () => void;
+  users: User[];
+  updateProfile: (fullName: string, department: string, avatarUrl?: string) => void;
 
   // Navigation & Global Search
   activeMainTab: MainTab;
@@ -85,6 +90,10 @@ interface AppContextType {
   openDashboard: (tab?: DashboardTab) => void;
   closeDashboard: () => void;
 
+  isImpactOpen: boolean;
+  openImpact: () => void;
+  closeImpact: () => void;
+
   // Data Collections
   products: ProductItem[];
   needPosts: NeedPost[];
@@ -101,7 +110,8 @@ interface AppContextType {
     title: string;
     description: string;
     price: number;
-    isFree: boolean;
+    listingType: ListingType;
+    retailPrice?: number;
     category: Exclude<ProductCategory, "all">;
     condition: ProductCondition;
     images: string[];
@@ -153,6 +163,11 @@ interface AppContextType {
     handoverPoint: CampusHandoverPoint;
   }) => void;
   replyToDirectMessage: (messageId: string, text: string) => void;
+  addNeedComment: (
+    needPostId: string,
+    text: string,
+    opts: { offerPrice?: number; isFreeOffer: boolean }
+  ) => void;
 
   // Notifications & Demo Utilities
   markAllNotificationsRead: () => void;
@@ -230,6 +245,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [directMessages, setDirectMessages] = useState<DirectMessage[]>(INITIAL_DIRECT_MESSAGES);
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [users, setUsers] = useState<User[]>(DEMO_USERS);
+  const [isImpactOpen, setIsImpactOpen] = useState(false);
+  const usersLoadedRef = useRef(false);
 
   // 1. Load persisted user session and fallback local cache on client mount
   useEffect(() => {
@@ -348,7 +366,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       () => {}
     );
 
+    const unsubUsers = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        usersLoadedRef.current = true;
+        if (!snapshot.empty) {
+          setUsers(snapshot.docs.map((d) => d.data() as User));
+        }
+      },
+      () => {
+        usersLoadedRef.current = true;
+      }
+    );
+
+    // Never block login forever if Firestore is unreachable
+    const usersLoadTimeout = setTimeout(() => {
+      usersLoadedRef.current = true;
+    }, 4000);
+
     return () => {
+      clearTimeout(usersLoadTimeout);
+      unsubUsers();
       unsubProducts();
       unsubNeeds();
       unsubOffers();
@@ -397,6 +435,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [products]);
 
+  // Re-hydrate the logged-in user's profile from the Firestore `users` collection
+  useEffect(() => {
+    if (!currentUser) return;
+    const remote = users.find((u) => u.id === currentUser.id);
+    if (remote && JSON.stringify(remote) !== JSON.stringify(currentUser)) {
+      setCurrentUser(remote);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users]);
+
+  // Keep selectedNeedPost in sync when needs update (public comment feed)
+  useEffect(() => {
+    if (selectedNeedPost) {
+      const updated = needPosts.find((n) => n.id === selectedNeedPost.id);
+      if (updated) setSelectedNeedPost(updated);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needPosts]);
+
   const showToast = (
     title: string,
     description?: string,
@@ -411,6 +468,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // USER HELPERS
+  const userIdFromEmail = (email: string) =>
+    `user-${email.split("@")[0].replace(/[^a-z0-9]/gi, "")}`;
+
+  const findStoredUser = (email: string): User | undefined =>
+    users.find((u) => u.email.toLowerCase() === email) ||
+    DEMO_USERS.find((u) => u.email.toLowerCase() === email);
+
+  const buildNewUser = (email: string): User => ({
+    id: userIdFromEmail(email),
+    email,
+    fullName: "",
+    department: "",
+    rating: 5.0,
+    reviewCount: 0,
+    completedSwaps: 0,
+    joinedAt: "Kasım 2026",
+    isVerifiedAgu: true,
+    needsOnboarding: true,
+  });
+
+  const upsertUser = (user: User) => {
+    setUsers((prev) =>
+      prev.some((u) => u.id === user.id)
+        ? prev.map((u) => (u.id === user.id ? user : u))
+        : [...prev, user]
+    );
+    saveDocToFirestore("users", user);
+  };
+
+  const incrementSwaps = (userId?: string) => {
+    if (!userId) return;
+    const base =
+      currentUser?.id === userId
+        ? currentUser
+        : users.find((u) => u.id === userId) ||
+          DEMO_USERS.find((u) => u.id === userId);
+    if (!base) return;
+    const updated: User = { ...base, completedSwaps: base.completedSwaps + 1 };
+    upsertUser(updated);
+    if (currentUser?.id === userId) setCurrentUser(updated);
+  };
+
+  /** Counts a finished campus handover once for seller and buyer. */
+  const completeSwap = (product: ProductItem, buyerId?: string) => {
+    if (product.status === "sold") return;
+    incrementSwaps(product.sellerId);
+    if (buyerId && buyerId !== product.sellerId) incrementSwaps(buyerId);
   };
 
   // AUTHENTICATION HANDLERS
@@ -428,46 +535,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         error: "Şifreniz en az 6 karakter olmalıdır.",
       };
     }
+    if (db && !usersLoadedRef.current) {
+      return {
+        ok: false,
+        error: "Kampüs veritabanına bağlanılıyor, birkaç saniye sonra tekrar dene.",
+      };
+    }
 
-    const existingDemoUser = DEMO_USERS.find(
-      (u) => u.email.toLowerCase() === trimmedEmail
-    );
-
-    if (existingDemoUser) {
-      setCurrentUser(existingDemoUser);
-      setIsOnboardingOpen(false);
-      saveDocToFirestore("users", existingDemoUser);
+    // Read the profile back from the Firestore `users` collection (or demo seed)
+    const existing = findStoredUser(trimmedEmail);
+    if (existing) {
+      setCurrentUser(existing);
+      setIsOnboardingOpen(Boolean(existing.needsOnboarding) || !existing.fullName);
       showToast(
-        `Hoş geldin, ${existingDemoUser.fullName}!`,
+        `Hoş geldin, ${existing.fullName || "AGÜ Öğrencisi"}!`,
         "AGU Sümer Kampüsü hesabınla giriş yapıldı."
       );
       return { ok: true };
     }
 
-    const namePart = trimmedEmail.split("@")[0].replace(/[._-]+/g, " ");
-    const formattedName = namePart
-      .split(" ")
-      .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ");
-
-    const loggedUser: User = {
-      id: `user-${trimmedEmail.split("@")[0].replace(/[^a-z0-9]/gi, "")}`,
-      email: trimmedEmail,
-      fullName: formattedName || "AGÜ Öğrencisi",
-      department: "Bilgisayar Mühendisliği",
-      rating: 5.0,
-      reviewCount: 1,
-      completedSwaps: 0,
-      joinedAt: "Kasım 2026",
-      isVerifiedAgu: true,
-      needsOnboarding: false,
-    };
-
-    setCurrentUser(loggedUser);
-    setIsOnboardingOpen(false);
-    saveDocToFirestore("users", loggedUser);
-    showToast(`Hoş geldin, ${loggedUser.fullName}!`, "Kampüs hesabın doğrulandı.");
+    // Unknown email: create an account that must complete onboarding
+    const newUser = buildNewUser(trimmedEmail);
+    setCurrentUser(newUser);
+    setIsOnboardingOpen(true);
+    upsertUser(newUser);
+    showToast(
+      "Kampüs hesabın oluşturuldu 🎓",
+      "Şimdi profilini tamamla.",
+      "info"
+    );
     return { ok: true };
   };
 
@@ -485,23 +581,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         error: "Güvenliğiniz için şifreniz en az 6 karakter olmalıdır.",
       };
     }
+    if (db && !usersLoadedRef.current) {
+      return {
+        ok: false,
+        error: "Kampüs veritabanına bağlanılıyor, birkaç saniye sonra tekrar dene.",
+      };
+    }
+    const existing = findStoredUser(trimmedEmail);
+    if (existing && !existing.needsOnboarding) {
+      return {
+        ok: false,
+        error: "Bu e-posta ile zaten bir hesap var. Lütfen \"Giriş Yap\" sekmesini kullan.",
+      };
+    }
 
-    const newUser: User = {
-      id: `user-${Date.now()}`,
-      email: trimmedEmail,
-      fullName: "",
-      department: "",
-      rating: 5.0,
-      reviewCount: 0,
-      completedSwaps: 0,
-      joinedAt: "Kasım 2026",
-      isVerifiedAgu: true,
-      needsOnboarding: true,
-    };
-
+    const newUser = existing || buildNewUser(trimmedEmail);
     setCurrentUser(newUser);
     setIsOnboardingOpen(true);
-    saveDocToFirestore("users", newUser);
+    upsertUser(newUser);
     showToast(
       "Kayıt Başarılı! 🎓",
       "Şimdi kampüs profilini tamamlayarak hemen ilan paylaşmaya başlayabilirsin.",
@@ -525,7 +622,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     setCurrentUser(updatedUser);
     setIsOnboardingOpen(false);
-    saveDocToFirestore("users", updatedUser);
+    upsertUser(updatedUser);
     showToast(
       `Aramıza hoş geldin, ${updatedUser.fullName}!`,
       `${department} profilin oluşturuldu ve veritabanına kaydedildi.`
@@ -552,6 +649,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     showToast("Çıkış Yapıldı", "Tekrar görüşmek üzere!", "info");
   };
 
+  const updateProfile = (
+    fullName: string,
+    department: string,
+    avatarUrl?: string
+  ) => {
+    if (!currentUser) return;
+    const updated: User = {
+      ...currentUser,
+      fullName: fullName.trim(),
+      department,
+      avatarUrl: avatarUrl || undefined,
+      needsOnboarding: false,
+    };
+    setCurrentUser(updated);
+    upsertUser(updated);
+
+    // Propagate denormalised profile fields to the user's own listings
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.sellerId !== updated.id) return p;
+        const np: ProductItem = {
+          ...p,
+          sellerName: updated.fullName,
+          sellerDepartment: updated.department,
+          sellerAvatar: updated.avatarUrl,
+        };
+        saveDocToFirestore("products", np);
+        return np;
+      })
+    );
+    setNeedPosts((prev) =>
+      prev.map((n) => {
+        if (n.requesterId !== updated.id) return n;
+        const nn: NeedPost = {
+          ...n,
+          requesterName: updated.fullName,
+          requesterDepartment: updated.department,
+          requesterAvatar: updated.avatarUrl,
+        };
+        saveDocToFirestore("needPosts", nn);
+        return nn;
+      })
+    );
+    showToast("Profil Güncellendi ✅", "Bilgilerin veritabanına kaydedildi.");
+  };
+
+  const openImpact = () => setIsImpactOpen(true);
+  const closeImpact = () => setIsImpactOpen(false);
+
   // MODAL & DRAWER CONTROLS
   const openAddListingModal = (mode: "product" | "need" = "product") => {
     setAddListingInitialMode(mode);
@@ -576,7 +722,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     title: string;
     description: string;
     price: number;
-    isFree: boolean;
+    listingType: ListingType;
+    retailPrice?: number;
     category: Exclude<ProductCategory, "all">;
     condition: ProductCondition;
     images: string[];
@@ -588,8 +735,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       id: `prod-${Date.now()}`,
       title: input.title.trim(),
       description: input.description.trim(),
-      price: input.isFree ? 0 : Number(input.price),
-      isFree: input.isFree || Number(input.price) === 0,
+      price: input.listingType === "sale" ? Number(input.price) : 0,
+      isFree: input.listingType !== "sale" || Number(input.price) === 0,
+      listingType:
+        input.listingType === "sale" && Number(input.price) === 0
+          ? "free"
+          : input.listingType,
+      retailPrice:
+        input.retailPrice && input.retailPrice > 0
+          ? Number(input.retailPrice)
+          : undefined,
       category: input.category,
       condition: input.condition,
       status: "available",
@@ -643,6 +798,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateProductStatus = (productId: string, status: ProductStatus) => {
+    const existingProduct = products.find((p) => p.id === productId);
+    if (status === "sold" && existingProduct && existingProduct.status !== "sold") {
+      completeSwap(existingProduct, existingProduct.reservedBy);
+    }
     setProducts((prev) =>
       prev.map((p) => {
         if (p.id !== productId) return p;
@@ -748,6 +907,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!currentUser) return;
     const product = products.find((p) => p.id === productId);
     if (!product || product.isFree) return;
+    if (product.sellerId === currentUser.id || product.status !== "available") return;
 
     const newOffer: Offer = {
       id: `offer-${Date.now()}`,
@@ -841,6 +1001,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!currentUser) return;
     const product = products.find((p) => p.id === productId);
     if (!product) return;
+    if (product.sellerId === currentUser.id || product.status !== "available") return;
 
     const newRes: Reservation = {
       id: `res-${Date.now()}`,
@@ -935,6 +1096,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         `${targetRes.handoverPoint} noktasında teslimat için onay verildi.`
       );
     } else if (status === "completed") {
+      const swapProduct = products.find((p) => p.id === targetRes.productId);
+      if (swapProduct) completeSwap(swapProduct, targetRes.buyerId);
       setProducts((prev) =>
         prev.map((p) => {
           if (p.id !== targetRes.productId) return p;
@@ -1047,6 +1210,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!currentUser) return;
     const need = needPosts.find((n) => n.id === input.needPostId);
     if (!need) return;
+    if (need.requesterId === currentUser.id) return;
 
     const linkedProduct = input.linkedProductId
       ? products.find((p) => p.id === input.linkedProductId)
@@ -1133,9 +1297,64 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     showToast("Yanıt Gönderildi 💬", "Mesajınız sohbete eklendi.");
   };
 
+  const addNeedComment = (
+    needPostId: string,
+    text: string,
+    opts: { offerPrice?: number; isFreeOffer: boolean }
+  ) => {
+    if (!currentUser || !text.trim()) return;
+    const need = needPosts.find((n) => n.id === needPostId);
+    if (!need) return;
+    const isRequester = need.requesterId === currentUser.id;
+
+    const comment: NeedComment = {
+      id: `nc-${Date.now()}`,
+      needPostId,
+      authorId: currentUser.id,
+      authorName: currentUser.fullName,
+      authorDepartment: currentUser.department,
+      authorAvatar: currentUser.avatarUrl,
+      text: text.trim(),
+      offerPrice: opts.isFreeOffer ? 0 : opts.offerPrice,
+      isFreeOffer: opts.isFreeOffer,
+      createdAt: "Şimdi",
+    };
+
+    setNeedPosts((prev) =>
+      prev.map((n) => {
+        if (n.id !== needPostId) return n;
+        const updated: NeedPost = {
+          ...n,
+          comments: [...(n.comments || []), comment],
+          responseCount: isRequester ? n.responseCount : n.responseCount + 1,
+        };
+        saveDocToFirestore("needPosts", updated);
+        return updated;
+      })
+    );
+
+    if (!isRequester) {
+      const newNotif: AppNotification = {
+        id: `notif-${Date.now()}`,
+        userId: need.requesterId,
+        type: "need_response",
+        title: "İhtiyaç İlanına Yeni Teklif / Yorum 💬",
+        body: `${currentUser.fullName}, "${need.title}" ilanına yorum yaptı.`,
+        createdAt: "Şimdi",
+        isRead: false,
+        targetDashboardTab: "my_needs",
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
+      saveDocToFirestore("notifications", newNotif);
+    }
+
+    showToast("Yorumun Yayınlandı 💬", "Herkes bu ilanın altında görebilir.");
+  };
+
   const markAllNotificationsRead = () => {
     setNotifications((prev) =>
       prev.map((n) => {
+        if (currentUser && n.userId !== currentUser.id) return n;
         const updated = { ...n, isRead: true };
         saveDocToFirestore("notifications", updated);
         return updated;
@@ -1193,6 +1412,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         completeOnboarding,
         loginAsDemoUser,
         logout,
+        users,
+        updateProfile,
         activeMainTab,
         setActiveMainTab,
         searchQuery,
@@ -1209,6 +1430,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         activeDashboardTab,
         openDashboard,
         closeDashboard,
+        isImpactOpen,
+        openImpact,
+        closeImpact,
         products,
         needPosts,
         offers,
@@ -1233,6 +1457,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         deleteNeedPost,
         sendHaveItemMessage,
         replyToDirectMessage,
+        addNeedComment,
         markAllNotificationsRead,
         markNotificationRead,
         resetDemoData,

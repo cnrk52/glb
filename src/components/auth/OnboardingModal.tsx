@@ -13,6 +13,7 @@ import {
 import { AGU_DEPARTMENTS, APP_NAME } from "@/lib/constants";
 import { useApp } from "@/context/AppContext";
 import { getInitials } from "@/lib/utils";
+import { compressImage } from "@/lib/image";
 
 export function OnboardingModal() {
   const { currentUser, isOnboardingOpen, completeOnboarding } = useApp();
@@ -29,16 +30,16 @@ export function OnboardingModal() {
 
   if (!isOnboardingOpen || !currentUser) return null;
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setAvatarUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      // Canvas compression keeps the avatar small for Firestore
+      setAvatarUrl(await compressImage(file, 400));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Görsel yüklenemedi.");
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {

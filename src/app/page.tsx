@@ -11,6 +11,7 @@ import { AddListingModal } from "@/components/modals/AddListingModal";
 import { ProductDetailModal } from "@/components/modals/ProductDetailModal";
 import { NeedDetailModal } from "@/components/modals/NeedDetailModal";
 import { ProfileDashboardModal } from "@/components/modals/ProfileDashboardModal";
+import { ImpactModal } from "@/components/modals/ImpactModal";
 import { ToastContainer } from "@/components/layout/ToastContainer";
 import { Footer } from "@/components/layout/Footer";
 
@@ -46,6 +47,7 @@ export default function HomePage() {
       <ProductDetailModal />
       <NeedDetailModal />
       <ProfileDashboardModal />
+      <ImpactModal />
       <ToastContainer />
     </div>
   );

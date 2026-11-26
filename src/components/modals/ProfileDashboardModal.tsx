@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { DashboardTab, useApp } from "@/context/AppContext";
 import { formatPrice, getInitials } from "@/lib/utils";
+import { ProfileEditor } from "@/components/modals/ProfileEditor";
 
 export function ProfileDashboardModal() {
   const {
@@ -83,6 +84,12 @@ export function ProfileDashboardModal() {
     icon: React.ReactNode;
   }[] = [
     {
+      id: "profile",
+      label: "Profilim",
+      count: currentUser.completedSwaps,
+      icon: <GraduationCap className="w-4 h-4" />,
+    },
+    {
       id: "my_products",
       label: "Vitrin İlanlarım",
       count: myProducts.length,
@@ -113,7 +120,7 @@ export function ProfileDashboardModal() {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
       <div className="bg-white rounded-3xl max-w-5xl w-full border border-slate-200 shadow-2xl overflow-hidden my-6 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         {/* Top User Profile Header */}
         <div className="p-6 bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white flex flex-wrap items-center justify-between gap-4 shrink-0">
@@ -198,6 +205,9 @@ export function ProfileDashboardModal() {
 
         {/* Tab Body */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6 bg-slate-50/50">
+          {/* TAB 0: PROFİLİM (düzenleme + takas sayacı) */}
+          {activeDashboardTab === "profile" && <ProfileEditor />}
+
           {/* TAB 1: VİTRİN İLANLARIM */}
           {activeDashboardTab === "my_products" && (
             <div className="space-y-4">
@@ -245,7 +255,7 @@ export function ProfileDashboardModal() {
                   {myProducts.map((prod) => (
                     <div
                       key={prod.id}
-                      className="p-4 rounded-2xl bg-white border border-slate-200 flex gap-4 items-start shadow-2xs"
+                      className="p-4 rounded-2xl bg-white border border-slate-200 flex gap-4 items-start shadow-sm"
                     >
                       <img
                         src={prod.images[0]}
@@ -432,7 +442,7 @@ export function ProfileDashboardModal() {
                     incomingOffers.map((off) => (
                       <div
                         key={off.id}
-                        className="p-4 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-2xs"
+                        className="p-4 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-sm"
                       >
                         <div className="flex items-center gap-3">
                           <img
@@ -571,7 +581,7 @@ export function ProfileDashboardModal() {
                   {incomingReservations.map((res) => (
                     <div
                       key={res.id}
-                      className="p-4 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-2xs"
+                      className="p-4 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-sm"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold text-slate-900">
@@ -704,7 +714,7 @@ export function ProfileDashboardModal() {
                   {myMessages.map((dm) => (
                     <div
                       key={dm.id}
-                      className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-2xs"
+                      className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-sm"
                     >
                       {/* Header */}
                       <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">

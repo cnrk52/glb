@@ -32,9 +32,16 @@ export function WishboardView() {
   const [selectedUrgency, setSelectedUrgency] = useState<NeedUrgency | "all">(
     "all"
   );
+  const [selectedStatus, setSelectedStatus] = useState<
+    "all" | "open" | "fulfilled"
+  >("open");
 
   const filteredNeeds = useMemo(() => {
     let list = [...needPosts];
+
+    if (selectedStatus !== "all") {
+      list = list.filter((n) => n.status === selectedStatus);
+    }
 
     if (selectedCategory !== "all") {
       list = list.filter((n) => n.category === selectedCategory);
@@ -57,7 +64,7 @@ export function WishboardView() {
     }
 
     return list;
-  }, [needPosts, selectedCategory, selectedUrgency, searchQuery]);
+  }, [needPosts, selectedCategory, selectedUrgency, selectedStatus, searchQuery]);
 
   const urgentCount = needPosts.filter(
     (n) => n.urgency === "urgent_lab" && n.status === "open"
@@ -109,7 +116,7 @@ export function WishboardView() {
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
+      <div className="bg-white rounded-2xl border border-slate-200/90 p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         {/* Category Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
           {CATEGORIES.map((cat) => (
@@ -126,6 +133,23 @@ export function WishboardView() {
               {cat.shortLabel}
             </button>
           ))}
+        </div>
+
+        {/* Status Filter (hide / show fulfilled needs) */}
+        <div className="flex items-center gap-2 shrink-0">
+          <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
+          <span className="text-xs font-semibold text-slate-500">Durum:</span>
+          <select
+            value={selectedStatus}
+            onChange={(e) =>
+              setSelectedStatus(e.target.value as "all" | "open" | "fulfilled")
+            }
+            className="px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 bg-slate-50 text-slate-700 cursor-pointer focus:outline-none focus:border-emerald-500"
+          >
+            <option value="open">Aktif Aranıyor</option>
+            <option value="fulfilled">Karşılananlar</option>
+            <option value="all">Tümü</option>
+          </select>
         </div>
 
         {/* Urgency Filter */}
@@ -207,12 +231,15 @@ function NeedPostCard({
   need: NeedPost;
   onSelect: () => void;
 }) {
+  const { currentUser } = useApp();
   const urgencyObj = NEED_URGENCY_CONFIG[need.urgency];
+  const isOwn = currentUser?.id === need.requesterId;
+  const isFulfilled = need.status === "fulfilled";
 
   return (
     <div
       onClick={onSelect}
-      className="group bg-white rounded-2xl border border-slate-200/90 hover:border-emerald-500/70 p-5 shadow-2xs hover:shadow-xl hover:shadow-slate-900/5 transition-all flex flex-col justify-between space-y-4 cursor-pointer"
+      className="group bg-white rounded-2xl border border-slate-200/90 hover:border-emerald-500/70 p-5 shadow-sm hover:shadow-xl hover:shadow-slate-900/5 transition-all flex flex-col justify-between space-y-4 cursor-pointer"
     >
       <div className="space-y-3.5">
         {/* Top Row: Urgency Badge + Category & Course Code */}
@@ -223,6 +250,11 @@ function NeedPostCard({
             <span className={`w-2 h-2 rounded-full ${urgencyObj.dotClass}`} />
             {urgencyObj.label}
           </span>
+          {isFulfilled && (
+            <span className="px-2 py-0.5 rounded-md bg-slate-800 text-white text-[10px] font-bold">
+              ✓ Karşılandı
+            </span>
+          )}
 
           <div className="flex items-center gap-1.5">
             {need.courseCode && (
@@ -285,12 +317,18 @@ function NeedPostCard({
             e.stopPropagation();
             onSelect();
           }}
-          className="w-full py-2.5 px-4 rounded-xl bg-slate-900 group-hover:bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer"
+          className="w-full py-2.5 px-4 rounded-xl bg-slate-900 group-hover:bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer"
         >
           <HandHeart className="w-4 h-4 text-emerald-400 group-hover:text-white" />
-          <span>Bende Bu Ürün Var / Mesaj Gönder</span>
+          <span>
+            {isOwn
+              ? "İlanım — Yorumları Gör"
+              : isFulfilled
+              ? "Detayı Gör"
+              : "Bende Bu Ürün Var / Mesaj Gönder"}
+          </span>
           {need.responseCount > 0 && (
-            <span className="ml-auto px-1.5 py-0.2 rounded-full bg-white/20 text-[10px]">
+            <span className="ml-auto px-1.5 py-0.5 rounded-full bg-white/20 text-[10px]">
               {need.responseCount} yanıt
             </span>
           )}

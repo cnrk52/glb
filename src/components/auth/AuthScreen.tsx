@@ -395,7 +395,11 @@ export function AuthScreen() {
                     setMode("register");
                     setEmail("yeni.ogrenci@agu.edu.tr");
                     setPassword("agu123456");
-                    registerWithAguEmail("yeni.ogrenci@agu.edu.tr", "agu123456");
+                    const reg = registerWithAguEmail("yeni.ogrenci@agu.edu.tr", "agu123456");
+                    if (!reg.ok) {
+                      const log = loginWithAguEmail("yeni.ogrenci@agu.edu.tr", "agu123456");
+                      if (!log.ok && log.error) setError(log.error);
+                    }
                   }}
                   className="p-2.5 rounded-xl bg-white hover:bg-emerald-50/60 border border-slate-200 hover:border-emerald-300 text-left transition-all group cursor-pointer"
                 >
