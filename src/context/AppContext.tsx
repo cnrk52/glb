@@ -187,6 +187,14 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: "h2h_agu_notifications_v1",
 };
 
+const DEMO_PRODUCT_IDS = new Set(INITIAL_PRODUCTS.map((p) => p.id));
+const DEMO_NEED_IDS = new Set(INITIAL_NEED_POSTS.map((n) => n.id));
+const DEMO_OFFER_IDS = new Set(INITIAL_OFFERS.map((o) => o.id));
+const DEMO_RESERVATION_IDS = new Set(INITIAL_RESERVATIONS.map((r) => r.id));
+const DEMO_MESSAGE_IDS = new Set(INITIAL_DIRECT_MESSAGES.map((m) => m.id));
+const DEMO_NOTIF_IDS = new Set(INITIAL_NOTIFICATIONS.map((nf) => nf.id));
+const DEMO_USER_IDS = new Set(DEMO_USERS.map((u) => u.id));
+
 /**
  * Strips undefined fields so Firestore setDoc never rejects optional undefined properties.
  */
@@ -221,7 +229,6 @@ async function removeDocFromFirestore(collectionName: string, id: string) {
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState(false);
-  const hasSeededRef = useRef(false);
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -238,46 +245,68 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [activeDashboardTab, setActiveDashboardTab] = useState<DashboardTab>("my_products");
 
-  const [products, setProducts] = useState<ProductItem[]>(INITIAL_PRODUCTS);
-  const [needPosts, setNeedPosts] = useState<NeedPost[]>(INITIAL_NEED_POSTS);
-  const [offers, setOffers] = useState<Offer[]>(INITIAL_OFFERS);
-  const [reservations, setReservations] = useState<Reservation[]>(INITIAL_RESERVATIONS);
-  const [directMessages, setDirectMessages] = useState<DirectMessage[]>(INITIAL_DIRECT_MESSAGES);
-  const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [needPosts, setNeedPosts] = useState<NeedPost[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [directMessages, setDirectMessages] = useState<DirectMessage[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [users, setUsers] = useState<User[]>(DEMO_USERS);
+  const [users, setUsers] = useState<User[]>([]);
   const [isImpactOpen, setIsImpactOpen] = useState(false);
   const usersLoadedRef = useRef(false);
 
-  // 1. Load persisted user session and fallback local cache on client mount
+  // 1. Load persisted user session and fallback local cache on client mount (excluding old demo items)
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem(STORAGE_KEYS.USER);
       if (savedUser) {
         const parsedUser: User = JSON.parse(savedUser);
-        setCurrentUser(parsedUser);
-        if (parsedUser.needsOnboarding) {
-          setIsOnboardingOpen(true);
+        if (!DEMO_USER_IDS.has(parsedUser.id)) {
+          setCurrentUser(parsedUser);
+          if (parsedUser.needsOnboarding) {
+            setIsOnboardingOpen(true);
+          }
+        } else {
+          localStorage.removeItem(STORAGE_KEYS.USER);
         }
       }
 
       const savedProducts = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-      if (savedProducts) setProducts(JSON.parse(savedProducts));
+      if (savedProducts) {
+        const parsed: ProductItem[] = JSON.parse(savedProducts);
+        setProducts(parsed.filter((p) => !DEMO_PRODUCT_IDS.has(p.id)));
+      }
 
       const savedNeeds = localStorage.getItem(STORAGE_KEYS.NEEDS);
-      if (savedNeeds) setNeedPosts(JSON.parse(savedNeeds));
+      if (savedNeeds) {
+        const parsed: NeedPost[] = JSON.parse(savedNeeds);
+        setNeedPosts(parsed.filter((n) => !DEMO_NEED_IDS.has(n.id)));
+      }
 
       const savedOffers = localStorage.getItem(STORAGE_KEYS.OFFERS);
-      if (savedOffers) setOffers(JSON.parse(savedOffers));
+      if (savedOffers) {
+        const parsed: Offer[] = JSON.parse(savedOffers);
+        setOffers(parsed.filter((o) => !DEMO_OFFER_IDS.has(o.id)));
+      }
 
       const savedRes = localStorage.getItem(STORAGE_KEYS.RESERVATIONS);
-      if (savedRes) setReservations(JSON.parse(savedRes));
+      if (savedRes) {
+        const parsed: Reservation[] = JSON.parse(savedRes);
+        setReservations(parsed.filter((r) => !DEMO_RESERVATION_IDS.has(r.id)));
+      }
 
       const savedMessages = localStorage.getItem(STORAGE_KEYS.MESSAGES);
-      if (savedMessages) setDirectMessages(JSON.parse(savedMessages));
+      if (savedMessages) {
+        const parsed: DirectMessage[] = JSON.parse(savedMessages);
+        setDirectMessages(parsed.filter((m) => !DEMO_MESSAGE_IDS.has(m.id)));
+      }
 
       const savedNotifs = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-      if (savedNotifs) setNotifications(JSON.parse(savedNotifs));
+      if (savedNotifs) {
+        const parsed: AppNotification[] = JSON.parse(savedNotifs);
+        setNotifications(parsed.filter((nf) => !DEMO_NOTIF_IDS.has(nf.id)));
+      }
     } catch (e) {
       console.warn("Failed to read state from localStorage:", e);
     } finally {
@@ -285,7 +314,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // 2. Real-time Firebase Cloud Firestore Subscriptions & Auto-Seeding
+  // 2. Real-time Firebase Cloud Firestore Subscriptions (Live Production Data Only)
   useEffect(() => {
     if (!db) return;
 
@@ -293,22 +322,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       collection(db, "products"),
       (snapshot) => {
         setIsFirestoreConnected(true);
-        if (snapshot.empty && !hasSeededRef.current) {
-          hasSeededRef.current = true;
-          // Seed initial AGU data into Firestore on first run
-          INITIAL_PRODUCTS.forEach((p) => saveDocToFirestore("products", p));
-          INITIAL_NEED_POSTS.forEach((n) => saveDocToFirestore("needPosts", n));
-          INITIAL_OFFERS.forEach((o) => saveDocToFirestore("offers", o));
-          INITIAL_RESERVATIONS.forEach((r) => saveDocToFirestore("reservations", r));
-          INITIAL_DIRECT_MESSAGES.forEach((m) => saveDocToFirestore("directMessages", m));
-          INITIAL_NOTIFICATIONS.forEach((nf) => saveDocToFirestore("notifications", nf));
-          DEMO_USERS.forEach((u) => saveDocToFirestore("users", u));
-          return;
-        }
-        if (!snapshot.empty) {
-          const loaded = snapshot.docs.map((d) => d.data() as ProductItem);
-          setProducts(loaded);
-        }
+        const all = snapshot.docs.map((d) => d.data() as ProductItem);
+        // Clean up any leftover demo seed docs from Firestore
+        all.forEach((p) => {
+          if (DEMO_PRODUCT_IDS.has(p.id)) {
+            removeDocFromFirestore("products", p.id);
+          }
+        });
+        setProducts(all.filter((p) => !DEMO_PRODUCT_IDS.has(p.id)));
       },
       (err) => {
         console.warn("Firestore products listener fallback:", err.message);
@@ -319,9 +340,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const unsubNeeds = onSnapshot(
       collection(db, "needPosts"),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setNeedPosts(snapshot.docs.map((d) => d.data() as NeedPost));
-        }
+        const all = snapshot.docs.map((d) => d.data() as NeedPost);
+        all.forEach((n) => {
+          if (DEMO_NEED_IDS.has(n.id)) {
+            removeDocFromFirestore("needPosts", n.id);
+          }
+        });
+        setNeedPosts(all.filter((n) => !DEMO_NEED_IDS.has(n.id)));
       },
       () => {}
     );
@@ -329,9 +354,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const unsubOffers = onSnapshot(
       collection(db, "offers"),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setOffers(snapshot.docs.map((d) => d.data() as Offer));
-        }
+        const all = snapshot.docs.map((d) => d.data() as Offer);
+        all.forEach((o) => {
+          if (DEMO_OFFER_IDS.has(o.id)) {
+            removeDocFromFirestore("offers", o.id);
+          }
+        });
+        setOffers(all.filter((o) => !DEMO_OFFER_IDS.has(o.id)));
       },
       () => {}
     );
@@ -339,9 +368,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const unsubReservations = onSnapshot(
       collection(db, "reservations"),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setReservations(snapshot.docs.map((d) => d.data() as Reservation));
-        }
+        const all = snapshot.docs.map((d) => d.data() as Reservation);
+        all.forEach((r) => {
+          if (DEMO_RESERVATION_IDS.has(r.id)) {
+            removeDocFromFirestore("reservations", r.id);
+          }
+        });
+        setReservations(all.filter((r) => !DEMO_RESERVATION_IDS.has(r.id)));
       },
       () => {}
     );
@@ -349,9 +382,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const unsubMessages = onSnapshot(
       collection(db, "directMessages"),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setDirectMessages(snapshot.docs.map((d) => d.data() as DirectMessage));
-        }
+        const all = snapshot.docs.map((d) => d.data() as DirectMessage);
+        all.forEach((m) => {
+          if (DEMO_MESSAGE_IDS.has(m.id)) {
+            removeDocFromFirestore("directMessages", m.id);
+          }
+        });
+        setDirectMessages(all.filter((m) => !DEMO_MESSAGE_IDS.has(m.id)));
       },
       () => {}
     );
@@ -359,9 +396,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const unsubNotifs = onSnapshot(
       collection(db, "notifications"),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setNotifications(snapshot.docs.map((d) => d.data() as AppNotification));
-        }
+        const all = snapshot.docs.map((d) => d.data() as AppNotification);
+        all.forEach((nf) => {
+          if (DEMO_NOTIF_IDS.has(nf.id)) {
+            removeDocFromFirestore("notifications", nf.id);
+          }
+        });
+        setNotifications(all.filter((nf) => !DEMO_NOTIF_IDS.has(nf.id)));
       },
       () => {}
     );
@@ -370,9 +411,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       collection(db, "users"),
       (snapshot) => {
         usersLoadedRef.current = true;
-        if (!snapshot.empty) {
-          setUsers(snapshot.docs.map((d) => d.data() as User));
-        }
+        const all = snapshot.docs.map((d) => d.data() as User);
+        all.forEach((u) => {
+          if (DEMO_USER_IDS.has(u.id)) {
+            removeDocFromFirestore("users", u.id);
+          }
+        });
+        setUsers(all.filter((u) => !DEMO_USER_IDS.has(u.id)));
       },
       () => {
         usersLoadedRef.current = true;
@@ -475,8 +520,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     `user-${email.split("@")[0].replace(/[^a-z0-9]/gi, "")}`;
 
   const findStoredUser = (email: string): User | undefined =>
-    users.find((u) => u.email.toLowerCase() === email) ||
-    DEMO_USERS.find((u) => u.email.toLowerCase() === email);
+    users.find((u) => u.email.toLowerCase() === email);
 
   const buildNewUser = (email: string): User => ({
     id: userIdFromEmail(email),
@@ -505,8 +549,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const base =
       currentUser?.id === userId
         ? currentUser
-        : users.find((u) => u.id === userId) ||
-          DEMO_USERS.find((u) => u.id === userId);
+        : users.find((u) => u.id === userId);
     if (!base) return;
     const updated: User = { ...base, completedSwaps: base.completedSwaps + 1 };
     upsertUser(updated);

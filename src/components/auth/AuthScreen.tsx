@@ -13,7 +13,6 @@ import {
   MapPin,
   Recycle,
   ShieldCheck,
-  Sparkles,
   AlertCircle,
 } from "lucide-react";
 import {
@@ -26,7 +25,7 @@ import {
 import { useApp } from "@/context/AppContext";
 
 export function AuthScreen() {
-  const { loginWithAguEmail, registerWithAguEmail, loginAsDemoUser } = useApp();
+  const { loginWithAguEmail, registerWithAguEmail } = useApp();
 
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -360,59 +359,6 @@ export function AuthScreen() {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Fast Demo Access Box for Live Presentation */}
-          <div className="pt-5 border-t border-slate-200">
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/90 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                  Jüri / Canlı Demo Hızlı Giriş Seçenekleri
-                </span>
-                <span className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  Tek Tıkla Dene
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Dolu bir öğrenci profiliyle (gelen teklifler, rezerveler ve mesajlarla) hemen incelemek veya yeni kayıt akışını test etmek için seçin:
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => loginAsDemoUser("user-caner")}
-                  className="p-2.5 rounded-xl bg-white hover:bg-emerald-50/60 border border-slate-200 hover:border-emerald-300 text-left transition-all group cursor-pointer"
-                >
-                  <div className="text-xs font-bold text-slate-900 group-hover:text-emerald-700">
-                    Caner Yılmaz
-                  </div>
-                  <div className="text-[11px] text-slate-500 truncate">
-                    Bilgisayar Müh. (Teklif & Mesaj Dolu)
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode("register");
-                    setEmail("yeni.ogrenci@agu.edu.tr");
-                    setPassword("agu123456");
-                    const reg = registerWithAguEmail("yeni.ogrenci@agu.edu.tr", "agu123456");
-                    if (!reg.ok) {
-                      const log = loginWithAguEmail("yeni.ogrenci@agu.edu.tr", "agu123456");
-                      if (!log.ok && log.error) setError(log.error);
-                    }
-                  }}
-                  className="p-2.5 rounded-xl bg-white hover:bg-emerald-50/60 border border-slate-200 hover:border-emerald-300 text-left transition-all group cursor-pointer"
-                >
-                  <div className="text-xs font-bold text-emerald-700">
-                    ✨ Yeni Kayıt & Onboarding
-                  </div>
-                  <div className="text-[11px] text-slate-500 truncate">
-                    İlk Profil Kurulum Modalını Aç
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

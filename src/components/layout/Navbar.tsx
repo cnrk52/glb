@@ -11,7 +11,6 @@ import {
   Pin,
   Plus,
   Recycle,
-  RotateCcw,
   Search,
   ShoppingBag,
   Sparkles,
@@ -42,7 +41,6 @@ export function Navbar() {
     directMessages,
     products,
     setSelectedProduct,
-    resetDemoData,
     openImpact,
   } = useApp();
 
@@ -501,18 +499,6 @@ export function Navbar() {
                     </div>
 
                     <div className="p-1.5 border-t border-slate-100 space-y-0.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsProfileOpen(false);
-                          resetDemoData();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Demo Verilerini Sıfırla</span>
-                      </button>
-
                       <button
                         type="button"
                         onClick={() => {
